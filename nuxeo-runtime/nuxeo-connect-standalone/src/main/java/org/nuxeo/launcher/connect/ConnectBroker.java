@@ -26,12 +26,17 @@ import java.io.Console;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -47,7 +52,6 @@ import javax.xml.xpath.XPathExpression;
 import javax.xml.xpath.XPathFactory;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.collections.ListUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
@@ -581,10 +585,19 @@ public class ConnectBroker {
      */
     public boolean pkgUninstall(List<String> packageIdsToRemove) {
         log.debug("Uninstalling: " + packageIdsToRemove);
-        for (String pkgId : packageIdsToRemove) {
+        Queue<String> remaining = new LinkedList<>(packageIdsToRemove);
+        while (!remaining.isEmpty()) {
+            String pkgId = remaining.poll();
             if (pkgUninstall(pkgId) == null) {
                 log.error("Unable to uninstall " + pkgId);
                 return false;
+            }
+            // When launcher is changed, it will exit the JVM (!) then restart
+            // Save pending packages as a file before it
+            if (isLauncherChanged()) {
+                // TODO Handle ignoreMissing?
+                String command = CommandInfo.CMD_UNINSTALL + ' ' + String.join(" ", remaining);
+                persistPendingCommands(command);
             }
         }
         return true;
@@ -597,7 +610,7 @@ public class ConnectBroker {
      * @return The uninstalled LocalPackage or null if failed
      */
     public LocalPackage pkgUninstall(String pkgId) {
-        if (env.getProperty(LAUNCHER_CHANGED_PROPERTY, "false").equals("true")) {
+        if (isLauncherChanged()) {
             System.exit(LAUNCHER_CHANGED_EXIT_CODE);
         }
         CommandInfo cmdInfo = cset.newCommandInfo(CommandInfo.CMD_UNINSTALL);
@@ -855,12 +868,46 @@ public class ConnectBroker {
      */
     public boolean pkgInstall(List<String> packageIdsToInstall, boolean ignoreMissing) {
         log.debug("Installing: " + packageIdsToInstall);
-        for (String pkgId : packageIdsToInstall) {
+        Queue<String> remaining = new LinkedList<>(packageIdsToInstall);
+        while (!remaining.isEmpty()) {
+            String pkgId = remaining.poll();
             if (pkgInstall(pkgId, ignoreMissing) == null && !ignoreMissing) {
                 return false;
             }
+            // When launcher is changed, it will exit the JVM (!) then restart
+            // Save pending packages as a file before it
+            if (isLauncherChanged()) {
+                // TODO Handle ignoreMissing?
+                String command = CommandInfo.CMD_INSTALL + ' ' + String.join(" ", remaining);
+                persistPendingCommands(command);
+            }
         }
         return true;
+    }
+
+    /**
+     * @see #persistPendingCommands(Iterable)
+     */
+    protected void persistPendingCommands(String... commands) {
+        persistPendingCommands(Arrays.asList(commands));
+    }
+
+    /**
+     * Persists the pending package operation into file system. It's useful when Nuxeo launcher is about to exit.
+     * <p>
+     * The target path will be <strong>truncated</strong> before being written. By default, target file is called
+     * "installAfterRestart.log".
+     *
+     * @param commands commands to persist, each string is an individual command
+     * @throws IllegalStateException if any exception occurs
+     */
+    protected void persistPendingCommands(Iterable<String> commands) {
+        Path path = env.getData().toPath().resolve("installAfterRestart.log");
+        try {
+            Files.write(path, commands, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot write to file " + path, e);
+        }
     }
 
     /**
@@ -877,6 +924,10 @@ public class ConnectBroker {
         return pkgInstall(pkgId, false);
     }
 
+    protected boolean isLauncherChanged() {
+        return "true".equals(env.getProperty(LAUNCHER_CHANGED_PROPERTY));
+    }
+
     /**
      * Install a local package.
      *
@@ -887,7 +938,7 @@ public class ConnectBroker {
      * @see #pkgInstall(List, boolean)
      */
     public LocalPackage pkgInstall(String pkgId, boolean ignoreMissing) {
-        if (env.getProperty(LAUNCHER_CHANGED_PROPERTY, "false").equals("true")) {
+        if (isLauncherChanged()) {
             System.exit(LAUNCHER_CHANGED_EXIT_CODE);
         }
         CommandInfo cmdInfo = cset.newCommandInfo(CommandInfo.CMD_INSTALL);
@@ -960,11 +1011,22 @@ public class ConnectBroker {
         List<String> pkgsToInstall = new ArrayList<>();
         List<String> pkgsToUninstall = new ArrayList<>();
         List<String> pkgsToRemove = new ArrayList<>();
-        List<String> lines;
+        Queue<String> remainingCmds;
+
+        // backup the commandsFile before any real execution
+        Path commandsPath = commandsFile.toPath();
+        Path backup = commandsPath.resolveSibling(commandsFile.getName() + ".bak");
+        if (doExecute) {
+            try {
+                Files.move(commandsPath, backup);
+            } catch (IOException e) {
+                log.error("Failed to backup the commands file: " + commandsFile);
+            }
+        }
         try {
-            lines = FileUtils.readLines(commandsFile);
-            for (String line : lines) {
-                line = line.trim();
+            remainingCmds = new LinkedList<>(Files.readAllLines(commandsFile.toPath()));
+            while (!remainingCmds.isEmpty()) {
+                String line = remainingCmds.poll().trim();
                 String[] split = line.split("\\s+", 2);
                 if (split.length == 2) {
                     if (split[0].equals(CommandInfo.CMD_INSTALL)) {
@@ -1047,6 +1109,9 @@ public class ConnectBroker {
                 if (errorValue != 0) {
                     log.error("Error processing pending package/command: " + line);
                 }
+                if (doExecute && !useResolver && isLauncherChanged()) {
+                    persistPendingCommands(remainingCmds);
+                }
             }
             if (doExecute) {
                 if (useResolver) {
@@ -1057,6 +1122,8 @@ public class ConnectBroker {
                         log.info("Relax mode changed from 'ask' to 'false' for executing the pending actions.");
                         relax = "false";
                     }
+                    // In the following line, Launcher might exit the JVM (!) to update itself.
+                    // The remaining tasks will be handled before exit inside the method:
                     boolean success = pkgRequest(pkgsToAdd, pkgsToInstall, pkgsToUninstall, pkgsToRemove, true,
                             ignoreMissing);
                     accept = oldAccept;
@@ -1066,12 +1133,7 @@ public class ConnectBroker {
                     }
                 }
                 if (errorValue != 0) {
-                    File bak = new File(commandsFile.getPath() + ".bak");
-                    bak.delete();
-                    commandsFile.renameTo(bak);
-                    log.error("Pending actions execution failed. The commands file has been moved to: " + bak);
-                } else {
-                    commandsFile.delete();
+                    log.error("Pending actions execution failed. The commands file has been moved to: " + backup);
                 }
             } else {
                 cset.log(true);
@@ -1374,10 +1436,10 @@ public class ConnectBroker {
                     return false;
                 }
 
-                List<String> packageIdsToRemove = resolution.getOrderedPackageIdsToRemove();
-                List<String> packageIdsToUpgrade = resolution.getUpgradePackageIds();
-                List<String> packageIdsToInstall = resolution.getOrderedPackageIdsToInstall();
-                List<String> packagesIdsToReInstall = new ArrayList<>();
+                Queue<String> packageIdsToRemove = new LinkedList<>(resolution.getOrderedPackageIdsToRemove());
+                Queue<String> packageIdsToUpgrade = new LinkedList<>(resolution.getUpgradePackageIds());
+                Queue<String> packageIdsToInstall = new LinkedList<>(resolution.getOrderedPackageIdsToInstall());
+                Queue<String> packagesIdsToReInstall = new LinkedList<>();
 
                 // Replace snapshots to install but already in cache (requested by name)
                 if (CollectionUtils.containsAny(packageIdsToInstall, localSnapshotsToMaybeReplace)) {
@@ -1403,18 +1465,32 @@ public class ConnectBroker {
                     // Don't use IDs to avoid downgrade instead of uninstall
                     packageIdsToRemove.addAll(resolution.getLocalPackagesToUpgrade().keySet());
                     DependencyResolution uninstallResolution = getPackageManager().resolveDependencies(null,
-                            packageIdsToRemove, null, requestPlatform, allowSNAPSHOT, keepExisting, true);
+                            new ArrayList<>(packageIdsToRemove), null, requestPlatform, allowSNAPSHOT, keepExisting, true);
                     log.debug("Sub-resolution (uninstall) " + uninstallResolution);
                     if (uninstallResolution.isFailed()) {
                         return false;
                     }
-                    List<String> newPackageIdsToRemove = uninstallResolution.getOrderedPackageIdsToRemove();
-                    packagesIdsToReInstall = ListUtils.subtract(newPackageIdsToRemove, packageIdsToRemove);
+                    Queue<String> newPackageIdsToRemove = new LinkedList<>(uninstallResolution.getOrderedPackageIdsToRemove());
+                    packagesIdsToReInstall = new LinkedList<>(newPackageIdsToRemove);
+                    packagesIdsToReInstall.removeAll(packageIdsToRemove);
                     packagesIdsToReInstall.removeAll(packageIdsToUpgrade);
                     packageIdsToRemove = newPackageIdsToRemove;
                 }
-                if (!pkgUninstall(packageIdsToRemove)) {
-                    return false;
+                log.debug("Uninstalling: " + packageIdsToRemove);
+                while (!packageIdsToRemove.isEmpty()) {
+                    String pkgId = packageIdsToRemove.poll();
+                    if (pkgUninstall(pkgId) == null) {
+                        log.error("Unable to uninstall " + pkgId);
+                        return false;
+                    }
+                    // When launcher is changed, it will exit the JVM (!) then restart
+                    // Save pending packages as a file before it
+                    if (isLauncherChanged()) {
+                        // TODO Handle ignoreMissing?
+                        String uninstall = CommandInfo.CMD_UNINSTALL + ' ' + String.join(" ", packageIdsToRemove);
+                        String install = CommandInfo.CMD_INSTALL + ' ' + String.join(" ", packageIdsToInstall);
+                        persistPendingCommands(uninstall, install);
+                    }
                 }
 
                 // Install
@@ -1422,15 +1498,26 @@ public class ConnectBroker {
                     // Add list of packages uninstalled because of upgrade
                     packageIdsToInstall.addAll(packagesIdsToReInstall);
                     DependencyResolution installResolution = getPackageManager().resolveDependencies(
-                            packageIdsToInstall, null, null, requestPlatform, allowSNAPSHOT, keepExisting, true);
+                            new ArrayList<>(packageIdsToInstall), null, null, requestPlatform, allowSNAPSHOT, keepExisting, true);
                     log.debug("Sub-resolution (install) " + installResolution);
                     if (installResolution.isFailed()) {
                         return false;
                     }
-                    packageIdsToInstall = installResolution.getOrderedPackageIdsToInstall();
+                    packageIdsToInstall = new LinkedList<>(installResolution.getOrderedPackageIdsToInstall());
                 }
-                if (!pkgInstall(packageIdsToInstall, ignoreMissing)) {
-                    return false;
+                log.debug("Installing: " + packageIdsToInstall);
+                while (!packageIdsToInstall.isEmpty()) {
+                    String pkgId = packageIdsToInstall.poll();
+                    if (pkgInstall(pkgId, ignoreMissing) == null && !ignoreMissing) {
+                        return false;
+                    }
+                    // When launcher is changed, it will exit the JVM (!) then restart
+                    // Save pending packages as a file before it
+                    if (isLauncherChanged()) {
+                        // TODO Handle ignoreMissing?
+                        String install = CommandInfo.CMD_INSTALL + ' ' + String.join(" ", packageIdsToInstall);
+                        persistPendingCommands(install);
+                    }
                 }
 
                 pkgRemove(pkgsToRemove);
