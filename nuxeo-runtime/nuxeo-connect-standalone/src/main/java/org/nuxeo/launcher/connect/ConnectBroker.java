@@ -28,9 +28,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -101,11 +103,11 @@ public class ConnectBroker {
 
     public static final String PACKAGES_XML = "packages.xml";
 
-    protected static final String LAUNCHER_CHANGED_PROPERTY = "launcher.changed";
-
-    protected static final int LAUNCHER_CHANGED_EXIT_CODE = 128;
+    public static final String INSTALL_AFTER_RESTART = "installAfterRestart.log";
 
     public static final String[] POSITIVE_ANSWERS = { "true", "yes", "y" };
+
+    protected static final String LAUNCHER_CHANGED_PROPERTY = "launcher.changed";
 
     private Environment env;
 
@@ -138,6 +140,13 @@ public class ConnectBroker {
         targetPlatform = env.getProperty(Environment.DISTRIBUTION_NAME) + "-"
                 + env.getProperty(Environment.DISTRIBUTION_VERSION);
         distributionMPDir = env.getProperty(PARAM_MP_DIR, DISTRIBUTION_MP_DIR_DEFAULT);
+    }
+
+    /**
+     * @since 10.2
+     */
+    protected Path getInstallAfterRestartPath() {
+        return env.getData().toPath().resolve(INSTALL_AFTER_RESTART);
     }
 
     public String getCLID() throws NoCLID {
@@ -592,12 +601,9 @@ public class ConnectBroker {
                 log.error("Unable to uninstall " + pkgId);
                 return false;
             }
-            // When launcher is changed, it will exit the JVM (!) then restart
-            // Save pending packages as a file before it
             if (isLauncherChanged()) {
-                // TODO Handle ignoreMissing?
-                String command = CommandInfo.CMD_UNINSTALL + ' ' + String.join(" ", remaining);
-                persistPendingCommands(command);
+                persistPendingCommand(CommandInfo.CMD_UNINSTALL, remaining);
+                throw new LauncherRestartException();
             }
         }
         return true;
@@ -610,9 +616,6 @@ public class ConnectBroker {
      * @return The uninstalled LocalPackage or null if failed
      */
     public LocalPackage pkgUninstall(String pkgId) {
-        if (isLauncherChanged()) {
-            System.exit(LAUNCHER_CHANGED_EXIT_CODE);
-        }
         CommandInfo cmdInfo = cset.newCommandInfo(CommandInfo.CMD_UNINSTALL);
         cmdInfo.param = pkgId;
         try {
@@ -874,37 +877,46 @@ public class ConnectBroker {
             if (pkgInstall(pkgId, ignoreMissing) == null && !ignoreMissing) {
                 return false;
             }
-            // When launcher is changed, it will exit the JVM (!) then restart
-            // Save pending packages as a file before it
             if (isLauncherChanged()) {
                 // TODO Handle ignoreMissing?
-                String command = CommandInfo.CMD_INSTALL + ' ' + String.join(" ", remaining);
-                persistPendingCommands(command);
+                persistPendingCommand(CommandInfo.CMD_INSTALL, remaining);
+                throw new LauncherRestartException();
             }
         }
         return true;
     }
 
     /**
-     * @see #persistPendingCommands(Iterable)
-     */
-    protected void persistPendingCommands(String... commands) {
-        persistPendingCommands(Arrays.asList(commands));
-    }
-
-    /**
      * Persists the pending package operation into file system. It's useful when Nuxeo launcher is about to exit.
      * <p>
-     * The target path will be <strong>truncated</strong> before being written. By default, target file is called
-     * "installAfterRestart.log".
+     * The given commands will be appended as lines to the target file, {@link #INSTALL_AFTER_RESTART}.
      *
      * @param commands commands to persist, each string is an individual command
      * @throws IllegalStateException if any exception occurs
+     * @see #INSTALL_AFTER_RESTART
+     * @since 10.2
      */
     protected void persistPendingCommands(Iterable<String> commands) {
-        Path path = env.getData().toPath().resolve("installAfterRestart.log");
+        Path path = getInstallAfterRestartPath();
         try {
-            Files.write(path, commands, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.write(path, commands, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot write to file " + path, e);
+        }
+    }
+
+    /**
+     * @see #persistPendingCommands(Iterable)
+     * @since 10.2
+     */
+    protected void persistPendingCommand(String commandName, Collection<String> args) {
+        if (args.isEmpty()) {
+            return;
+        }
+        Path path = getInstallAfterRestartPath();
+        String line = commandName + ' ' + String.join(" ", args);
+        try {
+            Files.write(path, Arrays.asList(line), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot write to file " + path, e);
         }
@@ -924,6 +936,9 @@ public class ConnectBroker {
         return pkgInstall(pkgId, false);
     }
 
+    /**
+     * @since 10.2
+     */
     protected boolean isLauncherChanged() {
         return "true".equals(env.getProperty(LAUNCHER_CHANGED_PROPERTY));
     }
@@ -938,9 +953,6 @@ public class ConnectBroker {
      * @see #pkgInstall(List, boolean)
      */
     public LocalPackage pkgInstall(String pkgId, boolean ignoreMissing) {
-        if (isLauncherChanged()) {
-            System.exit(LAUNCHER_CHANGED_EXIT_CODE);
-        }
         CommandInfo cmdInfo = cset.newCommandInfo(CommandInfo.CMD_INSTALL);
         cmdInfo.param = pkgId;
         try {
@@ -1018,9 +1030,9 @@ public class ConnectBroker {
         Path backup = commandsPath.resolveSibling(commandsFile.getName() + ".bak");
         if (doExecute) {
             try {
-                Files.move(commandsPath, backup);
+                Files.move(commandsPath, backup, StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException e) {
-                log.error("Failed to backup the commands file: " + commandsFile);
+                log.error("Failed to backup the commands file: " + commandsFile, e);
             }
         }
         try {
@@ -1111,6 +1123,7 @@ public class ConnectBroker {
                 }
                 if (doExecute && !useResolver && isLauncherChanged()) {
                     persistPendingCommands(remainingCmds);
+                    throw new LauncherRestartException();
                 }
             }
             if (doExecute) {
@@ -1300,6 +1313,7 @@ public class ConnectBroker {
      * @param keepExisting If false, the request will remove existing packages that are not part of the resolution
      * @param ignoreMissing Do not error out on missing packages, just handle the rest
      * @param upgradeMode If true, all packages will be upgraded to their last compliant version
+     * @throws LauncherRestartException if launcher is required to restart
      * @since 8.4
      */
     public boolean pkgRequest(List<String> pkgsToAdd, List<String> pkgsToInstall, List<String> pkgsToUninstall,
@@ -1483,13 +1497,11 @@ public class ConnectBroker {
                         log.error("Unable to uninstall " + pkgId);
                         return false;
                     }
-                    // When launcher is changed, it will exit the JVM (!) then restart
-                    // Save pending packages as a file before it
                     if (isLauncherChanged()) {
+                        persistPendingCommand(CommandInfo.CMD_UNINSTALL, packageIdsToRemove);
                         // TODO Handle ignoreMissing?
-                        String uninstall = CommandInfo.CMD_UNINSTALL + ' ' + String.join(" ", packageIdsToRemove);
-                        String install = CommandInfo.CMD_INSTALL + ' ' + String.join(" ", packageIdsToInstall);
-                        persistPendingCommands(uninstall, install);
+                        persistPendingCommand(CommandInfo.CMD_INSTALL, packageIdsToInstall);
+                        throw new LauncherRestartException();
                     }
                 }
 
@@ -1511,12 +1523,10 @@ public class ConnectBroker {
                     if (pkgInstall(pkgId, ignoreMissing) == null && !ignoreMissing) {
                         return false;
                     }
-                    // When launcher is changed, it will exit the JVM (!) then restart
-                    // Save pending packages as a file before it
                     if (isLauncherChanged()) {
                         // TODO Handle ignoreMissing?
-                        String install = CommandInfo.CMD_INSTALL + ' ' + String.join(" ", packageIdsToInstall);
-                        persistPendingCommands(install);
+                        persistPendingCommand(CommandInfo.CMD_INSTALL, packageIdsToInstall);
+                        throw new LauncherRestartException();
                     }
                 }
 

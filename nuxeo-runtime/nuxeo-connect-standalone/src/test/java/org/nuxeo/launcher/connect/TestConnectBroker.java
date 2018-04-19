@@ -21,10 +21,13 @@
 package org.nuxeo.launcher.connect;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -149,9 +152,9 @@ public class TestConnectBroker {
         ((StandaloneCallbackHolder) NuxeoConnectClient.getCallBackHolder()).setTestMode(true);
     }
 
-    private void copyPackageToStore(File nuxeoStrore, File uninstallFile, File pkgZip) {
+    private void copyPackageToStore(File nuxeoStore, File uninstallFile, File pkgZip) {
         try {
-            File pkgDir = new File(nuxeoStrore, pkgZip.getName().replace(".zip", ""));
+            File pkgDir = new File(nuxeoStore, pkgZip.getName().replace(".zip", ""));
             ZipUtils.unzip(pkgZip, pkgDir);
             FileUtils.copyFileToDirectory(uninstallFile, pkgDir);
         } catch (IOException e) {
@@ -161,13 +164,23 @@ public class TestConnectBroker {
 
     private void buildInitialPackageStore() throws IOException {
         File nuxeoPackages = new File(nuxeoHome, "packages");
-        File nuxeoStrore = new File(nuxeoPackages, "store");
+        File nuxeoStore = new File(nuxeoPackages, "store");
         File uninstallFile = new File(testStore, "uninstall.xml");
+
+        // Copy all unzipped packages
+        String[] unzippedPkgs = { "NXP-24507-A-1.0.0", "NXP-24507-B-1.0.0" };
+        for (String pkg : unzippedPkgs) {
+            File sourceDir = new File(testStore, pkg);
+            File targetDir = new File(nuxeoStore, pkg);
+            assertThat(sourceDir).exists();
+            FileUtils.copyDirectory(sourceDir, targetDir);
+        }
+
         // Copy all zip from testStore
         FileUtils.iterateFiles(testStore, new String[] { "zip" }, false).forEachRemaining(
-                pkgZip -> copyPackageToStore(nuxeoStrore, uninstallFile, pkgZip));
+                pkgZip -> copyPackageToStore(nuxeoStore, uninstallFile, pkgZip));
         // Copy only installed packages from testStore/local-only
-        copyPackageToStore(nuxeoStrore, uninstallFile, new File(TEST_LOCAL_ONLY_PATH, "K-1.0.0-SNAPSHOT.zip"));
+        copyPackageToStore(nuxeoStore, uninstallFile, new File(TEST_LOCAL_ONLY_PATH, "K-1.0.0-SNAPSHOT.zip"));
 
         FileUtils.copyFileToDirectory(new File(testStore, ".packages"), nuxeoPackages);
     }
@@ -177,6 +190,62 @@ public class TestConnectBroker {
         // clear system properties
         System.clearProperty(Environment.NUXEO_HOME);
         System.clearProperty(TomcatConfigurator.TOMCAT_HOME);
+    }
+
+    // NXP-24507
+    @Test
+    public void testInstallPackageRequest_restartLauncherWithNoPending() {
+        // Given a downloaded package, which requires launcher restart
+        checkPackagesState(connectBroker, Arrays.asList("NXP-24507-A-1.0.0"), PackageState.DOWNLOADED);
+
+        // When handling the install request
+        try {
+            connectBroker.pkgRequest(null, Arrays.asList("NXP-24507-A-1.0.0"), null, null, true, false);
+            fail();
+        } catch (LauncherRestartException e) {
+            // Then an exception is raised
+        }
+        // And no file is created for pending changes (0 remaining).
+        Path pending = connectBroker.getInstallAfterRestartPath();
+        assertThat(pending).doesNotExist();
+    }
+
+    // NXP-24507
+    @Test
+    public void testInstallPackageRequest_restartLauncherWithOnePending() {
+        // Given a downloaded package, which requires launcher restart
+        String pkgA = "NXP-24507-A-1.0.0";
+        String pkgB = "NXP-24507-B-1.0.0";
+        checkPackagesState(connectBroker, Arrays.asList(pkgA, pkgB), PackageState.DOWNLOADED);
+
+        // When handling the install request
+        try {
+            connectBroker.pkgRequest(null, Arrays.asList(pkgA, pkgB), null, null, true, false);
+            fail();
+        } catch (LauncherRestartException e) {
+            // Then an exception is raised
+        }
+        // And a file is created for pending changes
+        Path pending = connectBroker.getInstallAfterRestartPath();
+        assertThat(pending).hasContent("install NXP-24507-B-1.0.0");
+    }
+
+    @Test
+    public void tesPersistPendingCommands_nonexistentPath() throws Exception {
+        Path path = connectBroker.getInstallAfterRestartPath();
+        assertThat(path).doesNotExist();
+
+        connectBroker.persistPendingCommands(Arrays.asList("L1", "L2"));
+        assertThat(Files.readAllLines(path)).containsExactly("L1", "L2");
+    }
+
+    @Test
+    public void tesPersistPendingCommands_existingPath() throws Exception {
+        Path path = connectBroker.getInstallAfterRestartPath();
+        Files.write(path, Arrays.asList("L1", "L2"));
+
+        connectBroker.persistPendingCommands(Arrays.asList("L3", "L4"));
+        assertThat(Files.readAllLines(path)).containsExactly("L1", "L2", "L3", "L4");
     }
 
     @Test
