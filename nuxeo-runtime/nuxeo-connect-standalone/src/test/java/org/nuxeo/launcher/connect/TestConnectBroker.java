@@ -194,7 +194,7 @@ public class TestConnectBroker {
 
     // NXP-24507
     @Test
-    public void testInstallPackageRequest_restartLauncherWithNoPending() {
+    public void testInstallPackageRequest_restartLauncherWithoutPendingCommand() {
         // Given a downloaded package, which requires launcher restart
         checkPackagesState(connectBroker, Arrays.asList("NXP-24507-A-1.0.0"), PackageState.DOWNLOADED);
 
@@ -203,7 +203,8 @@ public class TestConnectBroker {
             connectBroker.pkgRequest(null, Arrays.asList("NXP-24507-A-1.0.0"), null, null, true, false);
             fail();
         } catch (LauncherRestartException e) {
-            // Then an exception is raised
+            // Then restarting launcher is required
+            assertThat(connectBroker.isRestartRequired()).isTrue();
         }
         // And no file is created for pending changes (0 remaining).
         Path pending = connectBroker.getInstallAfterRestartPath();
@@ -212,7 +213,7 @@ public class TestConnectBroker {
 
     // NXP-24507
     @Test
-    public void testInstallPackageRequest_restartLauncherWithOnePending() {
+    public void testInstallPackageRequest_restartLauncherWithOnePendingCommand() {
         // Given a downloaded package, which requires launcher restart
         String pkgA = "NXP-24507-A-1.0.0";
         String pkgB = "NXP-24507-B-1.0.0";
@@ -223,7 +224,8 @@ public class TestConnectBroker {
             connectBroker.pkgRequest(null, Arrays.asList(pkgA, pkgB), null, null, true, false);
             fail();
         } catch (LauncherRestartException e) {
-            // Then an exception is raised
+            // Then restarting launcher is required
+            assertThat(connectBroker.isRestartRequired()).isTrue();
         }
         // And a file is created for pending changes
         Path pending = connectBroker.getInstallAfterRestartPath();

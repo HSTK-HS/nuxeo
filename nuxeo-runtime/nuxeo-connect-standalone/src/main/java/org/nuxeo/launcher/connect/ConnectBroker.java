@@ -601,7 +601,7 @@ public class ConnectBroker {
                 log.error("Unable to uninstall " + pkgId);
                 return false;
             }
-            if (isLauncherChanged()) {
+            if (isRestartRequired()) {
                 persistPendingCommand(CommandInfo.CMD_UNINSTALL, remaining);
                 throw new LauncherRestartException();
             }
@@ -877,7 +877,7 @@ public class ConnectBroker {
             if (pkgInstall(pkgId, ignoreMissing) == null && !ignoreMissing) {
                 return false;
             }
-            if (isLauncherChanged()) {
+            if (isRestartRequired()) {
                 // TODO Handle ignoreMissing?
                 persistPendingCommand(CommandInfo.CMD_INSTALL, remaining);
                 throw new LauncherRestartException();
@@ -939,7 +939,7 @@ public class ConnectBroker {
     /**
      * @since 10.2
      */
-    protected boolean isLauncherChanged() {
+    protected boolean isRestartRequired() {
         return "true".equals(env.getProperty(LAUNCHER_CHANGED_PROPERTY));
     }
 
@@ -1120,7 +1120,7 @@ public class ConnectBroker {
                 if (errorValue != 0) {
                     log.error("Error processing pending package/command: " + line);
                 }
-                if (doExecute && !useResolver && isLauncherChanged()) {
+                if (doExecute && !useResolver && isRestartRequired()) {
                     persistPendingCommands(remainingCmds);
                     throw new LauncherRestartException();
                 }
@@ -1496,7 +1496,7 @@ public class ConnectBroker {
                         log.error("Unable to uninstall " + pkgId);
                         return false;
                     }
-                    if (isLauncherChanged()) {
+                    if (isRestartRequired()) {
                         persistPendingCommand(CommandInfo.CMD_UNINSTALL, packageIdsToRemove);
                         // TODO Handle ignoreMissing?
                         persistPendingCommand(CommandInfo.CMD_INSTALL, packageIdsToInstall);
@@ -1522,7 +1522,7 @@ public class ConnectBroker {
                     if (pkgInstall(pkgId, ignoreMissing) == null && !ignoreMissing) {
                         return false;
                     }
-                    if (isLauncherChanged()) {
+                    if (isRestartRequired()) {
                         // TODO Handle ignoreMissing?
                         persistPendingCommand(CommandInfo.CMD_INSTALL, packageIdsToInstall);
                         throw new LauncherRestartException();
