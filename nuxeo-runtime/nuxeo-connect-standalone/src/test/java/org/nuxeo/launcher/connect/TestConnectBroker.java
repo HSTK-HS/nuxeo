@@ -171,20 +171,20 @@ public class TestConnectBroker {
         File nuxeoStore = new File(nuxeoPackages, "store");
         File uninstallFile = new File(testStore, "uninstall.xml");
 
-        // Copy all unzipped packages
-        String[] unzippedPkgs = { "NXP-24507-A-1.0.0", "NXP-24507-B-1.0.0" };
-        for (String pkg : unzippedPkgs) {
-            File sourceDir = new File(testStore, pkg);
-            File targetDir = new File(nuxeoStore, pkg);
-            assertThat(sourceDir).exists();
-            FileUtils.copyDirectory(sourceDir, targetDir);
-        }
-
         // Copy all zip from testStore
         FileUtils.iterateFiles(testStore, new String[] { "zip" }, false).forEachRemaining(
                 pkgZip -> copyPackageToStore(nuxeoStore, uninstallFile, pkgZip));
         // Copy only installed packages from testStore/local-only
         copyPackageToStore(nuxeoStore, uninstallFile, new File(TEST_LOCAL_ONLY_PATH, "K-1.0.0-SNAPSHOT.zip"));
+
+        // Copy all unzipped packages
+        String[] unzippedPkgs = { "NXP-24507-A-1.0.0", "NXP-24507-B-1.0.0" };
+        for (String pkg : unzippedPkgs) {
+            File sourceDir = new File(TEST_LOCAL_ONLY_PATH, pkg);
+            File targetDir = new File(nuxeoStore, pkg);
+            assertThat(sourceDir).exists();
+            FileUtils.copyDirectory(sourceDir, targetDir);
+        }
 
         FileUtils.copyFileToDirectory(new File(testStore, ".packages"), nuxeoPackages);
     }
@@ -334,6 +334,8 @@ public class TestConnectBroker {
         assertThat(connectBroker.isRemotePackageId("F.1.0.0-SNAPSHOT")).isFalse();
         assertThat(connectBroker.isRemotePackageId("K.1.0.0-SNAPSHOT")).isFalse();
         assertThat(connectBroker.isRemotePackageId("unknown-package")).isFalse();
+        assertThat(connectBroker.isRemotePackageId("NXP-24507-A-1.0.0")).isFalse();
+        assertThat(connectBroker.isRemotePackageId("NXP-24507-B-1.0.0")).isFalse();
     }
 
     @Test

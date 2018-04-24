@@ -1,6 +1,6 @@
-<package type="hotfix" name="NXP-24507-A" version="1.0.0">
-  <title>Hot Fix NXP-24507-A</title>
-  <description>Hot Fix for NXP-24507-A</description>
+<package type="addon" name="NXP-24507-A" version="1.0.0">
+  <title>Package NXP-24507 A</title>
+  <description>Package NXP-24507 A</description>
   <home-page>http://doc.nuxeo.com/x/7YGo</home-page>
   <vendor>Nuxeo</vendor>
   <installer restart="true" />
