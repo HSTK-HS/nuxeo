@@ -1025,13 +1025,13 @@ public class ConnectBroker {
         List<String> pkgsToUninstall = new ArrayList<>();
         List<String> pkgsToRemove = new ArrayList<>();
 
-        // backup the commandsFile before any real execution
         Path commandsPath = commandsFile.toPath();
         pendingFile = commandsPath;
         Path backup = commandsPath.resolveSibling(commandsFile.getName() + ".bak");
         try {
             Queue<String> remainingCmds = new LinkedList<>(Files.readAllLines(commandsFile.toPath()));
             if (doExecute) {
+                // backup the commandsFile before any real execution
                 Files.move(commandsPath, backup, StandardCopyOption.REPLACE_EXISTING);
             }
             while (!remainingCmds.isEmpty()) {
@@ -1132,8 +1132,6 @@ public class ConnectBroker {
                         log.info("Relax mode changed from 'ask' to 'false' for executing the pending actions.");
                         relax = "false";
                     }
-                    // In the following line, Launcher might exit the JVM (!) to update itself.
-                    // The remaining tasks will be handled before exit inside the method:
                     boolean success = pkgRequest(pkgsToAdd, pkgsToInstall, pkgsToUninstall, pkgsToRemove, true,
                             ignoreMissing);
                     accept = oldAccept;
