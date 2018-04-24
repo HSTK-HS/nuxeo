@@ -1023,7 +1023,6 @@ public class ConnectBroker {
         List<String> pkgsToInstall = new ArrayList<>();
         List<String> pkgsToUninstall = new ArrayList<>();
         List<String> pkgsToRemove = new ArrayList<>();
-        Queue<String> remainingCmds;
 
         // backup the commandsFile before any real execution
         Path commandsPath = commandsFile.toPath();
@@ -1036,7 +1035,7 @@ public class ConnectBroker {
             }
         }
         try {
-            remainingCmds = new LinkedList<>(Files.readAllLines(commandsFile.toPath()));
+            Queue<String> remainingCmds = new LinkedList<>(Files.readAllLines(commandsFile.toPath()));
             while (!remainingCmds.isEmpty()) {
                 String line = remainingCmds.poll().trim();
                 String[] split = line.split("\\s+", 2);
