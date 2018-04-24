@@ -917,11 +917,10 @@ public class ConnectBroker {
      * @since 10.2
      */
     protected void persistPendingCommand(String commandName, Collection<String> args) {
-        if (args.isEmpty()) {
-            return;
+        if (!args.isEmpty()) {
+            String command = commandName + ' ' + String.join(" ", args);
+            persistPendingCommand(command);
         }
-        String command = commandName + ' ' + String.join(" ", args);
-        persistPendingCommand(command);
     }
 
     /**
