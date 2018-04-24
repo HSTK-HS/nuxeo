@@ -90,6 +90,7 @@ import org.nuxeo.launcher.info.PackageInfo;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 
+
 /**
  * @since 5.6
  */
@@ -889,37 +890,32 @@ public class ConnectBroker {
     /**
      * Persists the pending package operation into file system. It's useful when Nuxeo launcher is about to exit.
      * <p>
-     * The given commands will be appended as lines to the target file, {@link #INSTALL_AFTER_RESTART}.
+     * The given command will be appended as a new line into target file, {@link #INSTALL_AFTER_RESTART}.
      *
-     * @param commands commands to persist, each string is an individual command
+     * @param command command to persist (appended as a new line)
      * @throws IllegalStateException if any exception occurs
      * @see #INSTALL_AFTER_RESTART
      * @since 10.2
      */
-    protected void persistPendingCommands(Iterable<String> commands) {
+    protected void persistPendingCommand(String command) {
         Path path = getInstallAfterRestartPath();
         try {
-            Files.write(path, commands, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.write(path, Arrays.asList(command), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot write to file " + path, e);
         }
     }
 
     /**
-     * @see #persistPendingCommands(Iterable)
+     * @see #persistPendingCommand(String)
      * @since 10.2
      */
     protected void persistPendingCommand(String commandName, Collection<String> args) {
         if (args.isEmpty()) {
             return;
         }
-        Path path = getInstallAfterRestartPath();
-        String line = commandName + ' ' + String.join(" ", args);
-        try {
-            Files.write(path, Arrays.asList(line), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot write to file " + path, e);
-        }
+        String command = commandName + ' ' + String.join(" ", args);
+        persistPendingCommand(command);
     }
 
     /**
@@ -1121,7 +1117,7 @@ public class ConnectBroker {
                     log.error("Error processing pending package/command: " + line);
                 }
                 if (doExecute && !useResolver && isRestartRequired()) {
-                    persistPendingCommands(remainingCmds);
+                    remainingCmds.forEach(this::persistPendingCommand);
                     throw new LauncherRestartException();
                 }
             }

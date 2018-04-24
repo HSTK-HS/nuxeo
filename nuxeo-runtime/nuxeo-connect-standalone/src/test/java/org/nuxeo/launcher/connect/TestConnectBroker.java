@@ -233,26 +233,26 @@ public class TestConnectBroker {
     }
 
     @Test
-    public void testPersistPendingCommands_createNewFile() throws Exception {
+    public void testPersistPendingCommand_createNewFile() throws Exception {
         // Given a nonexistent path for pending commands
         Path path = connectBroker.getInstallAfterRestartPath();
         assertThat(path).doesNotExist();
 
         // When persist new pending commands
-        connectBroker.persistPendingCommands(Arrays.asList("L1", "L2"));
+        Arrays.asList("L1", "L2").forEach(connectBroker::persistPendingCommand);
 
         // Then the file is created: new commands are present
         assertThat(Files.readAllLines(path)).containsExactly("L1", "L2");
     }
 
     @Test
-    public void testPersistPendingCommands_appendExistingFile() throws Exception {
+    public void testPersistPendingCommand_appendExistingFile() throws Exception {
         // Given an existing path for pending commands
         Path path = connectBroker.getInstallAfterRestartPath();
         Files.write(path, Arrays.asList("L1", "L2"));
 
         // When persist new pending commands
-        connectBroker.persistPendingCommands(Arrays.asList("L3", "L4"));
+        Arrays.asList("L3", "L4").forEach(connectBroker::persistPendingCommand);
 
         // Then the file is created: both old and new commands are present
         assertThat(Files.readAllLines(path)).containsExactly("L1", "L2", "L3", "L4");
