@@ -259,6 +259,22 @@ public class TestConnectBroker {
     }
 
     @Test
+    public void testPersistPendingCommand_appendReadOnlyFile() throws Exception {
+        // Given an exiting path for pending commands
+        File file = connectBroker.getInstallAfterRestartPath().toFile();
+        assertThat(file.createNewFile()).isTrue();
+        assertThat(file.setReadOnly()).isTrue();
+
+        try {
+            // When persist new pending commands
+            connectBroker.persistPendingCommand("myCommand");
+            fail();
+        } catch (IllegalStateException e) {
+            // Then an exception is raised
+        }
+    }
+
+    @Test
     public void testIsRemotePackageId() throws Exception {
         Set<String> remotePackageIds = collectIdsFrom("addon_remote.json", "hotfix_remote.json", "studio_remote.json");
         remotePackageIds.forEach(id -> assertThat(connectBroker.isRemotePackageId(id)).isTrue());
