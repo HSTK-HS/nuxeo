@@ -152,6 +152,7 @@ public class TestConnectBroker {
         environment.setProperty(Environment.DISTRIBUTION_NAME, "server");
         environment.setProperty(Environment.DISTRIBUTION_VERSION, "8.3");
         connectBroker = new ConnectBroker(environment);
+        connectBroker.setPendingFile(environment.getData().toPath().resolve("installAfterRestart.log"));
         ((StandaloneCallbackHolder) NuxeoConnectClient.getCallBackHolder()).setTestMode(true);
     }
 
@@ -210,7 +211,7 @@ public class TestConnectBroker {
             assertThat(connectBroker.isRestartRequired()).isTrue();
         }
         // And no file is created for pending changes (0 remaining).
-        Path pending = connectBroker.getInstallAfterRestartPath();
+        Path pending = connectBroker.getPendingFile();
         assertThat(pending).doesNotExist();
     }
 
@@ -233,14 +234,14 @@ public class TestConnectBroker {
         // And package A is installed
         checkPackagesState(PackageState.STARTED, pkgA);
         // And a file is created for pending changes
-        Path pending = connectBroker.getInstallAfterRestartPath();
+        Path pending = connectBroker.getPendingFile();
         assertThat(pending).hasContent("install " + pkgB);
     }
 
     @Test
     public void testPersistPendingCommand_createNewFile() throws Exception {
         // Given a nonexistent path for pending commands
-        Path path = connectBroker.getInstallAfterRestartPath();
+        Path path = connectBroker.getPendingFile();
         assertThat(path).doesNotExist();
 
         // When persist new pending commands
@@ -253,7 +254,7 @@ public class TestConnectBroker {
     @Test
     public void testPersistPendingCommand_appendExistingFile() throws Exception {
         // Given an existing path for pending commands
-        Path path = connectBroker.getInstallAfterRestartPath();
+        Path path = connectBroker.getPendingFile();
         Files.write(path, Arrays.asList("L1", "L2"));
 
         // When persist new pending commands
@@ -266,7 +267,7 @@ public class TestConnectBroker {
     @Test
     public void testPersistPendingCommand_appendReadOnlyFile() throws Exception {
         // Given an exiting path for pending commands
-        File file = connectBroker.getInstallAfterRestartPath().toFile();
+        File file = connectBroker.getPendingFile().toFile();
         assertThat(file.createNewFile()).isTrue();
         assertThat(file.setReadOnly()).isTrue();
 
@@ -282,7 +283,7 @@ public class TestConnectBroker {
     @Test
     public void testExecutePending_resumeCommands() throws Exception {
         // Given an exiting path for pending commands
-        Path path = connectBroker.getInstallAfterRestartPath();
+        Path path = connectBroker.getPendingFile();
         Files.write(path, Arrays.asList("install A-1.2.0", "install B-1.0.1"));
 
         // When executing the pending changes
@@ -298,7 +299,7 @@ public class TestConnectBroker {
         // Given an exiting path for pending commands
         String pkgA = "NXP-24507-A-1.0.0";
         String pkgB = "NXP-24507-B-1.0.0";
-        Path path = connectBroker.getInstallAfterRestartPath();
+        Path path = connectBroker.getPendingFile();
         Files.write(path, Arrays.asList("install " + pkgA, "install " + pkgB));
 
         // When executing the pending changes

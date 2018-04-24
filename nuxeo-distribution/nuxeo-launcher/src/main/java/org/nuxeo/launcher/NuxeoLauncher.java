@@ -2693,6 +2693,7 @@ public abstract class NuxeoLauncher {
         if (new Version(info.distribution.version).isSnapshot()) {
             connectBroker.setAllowSNAPSHOT(true);
         }
+        connectBroker.setPendingFile(configurationGenerator.getInstallFile().toPath());
     }
 
     protected ConnectBroker getConnectBroker() throws IOException, PackageException {

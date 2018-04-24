@@ -104,8 +104,6 @@ public class ConnectBroker {
 
     public static final String PACKAGES_XML = "packages.xml";
 
-    public static final String INSTALL_AFTER_RESTART = "installAfterRestart.log";
-
     public static final String[] POSITIVE_ANSWERS = { "true", "yes", "y" };
 
     protected static final String LAUNCHER_CHANGED_PROPERTY = "launcher.changed";
@@ -130,6 +128,8 @@ public class ConnectBroker {
 
     private boolean allowSNAPSHOT = CUDFHelper.defaultAllowSNAPSHOT;
 
+    private Path pendingFile;
+
     public static final String OPTION_ACCEPT_DEFAULT = "ask";
 
     public ConnectBroker(Environment env) throws IOException, PackageException {
@@ -146,8 +146,15 @@ public class ConnectBroker {
     /**
      * @since 10.2
      */
-    protected Path getInstallAfterRestartPath() {
-        return env.getData().toPath().resolve(INSTALL_AFTER_RESTART);
+    public Path getPendingFile() {
+        return pendingFile;
+    }
+
+    /**
+     * @since 10.2
+     */
+    public void setPendingFile(Path pendingFile) {
+        this.pendingFile = pendingFile;
     }
 
     public String getCLID() throws NoCLID {
@@ -879,7 +886,6 @@ public class ConnectBroker {
                 return false;
             }
             if (isRestartRequired()) {
-                // TODO Handle ignoreMissing?
                 persistPendingCommand(CommandInfo.CMD_INSTALL, remaining);
                 throw new LauncherRestartException();
             }
@@ -890,19 +896,19 @@ public class ConnectBroker {
     /**
      * Persists the pending package operation into file system. It's useful when Nuxeo launcher is about to exit.
      * <p>
-     * The given command will be appended as a new line into target file, {@link #INSTALL_AFTER_RESTART}.
+     * The given command will be appended as a new line into target file {@link #pendingFile}. NOTE: the command line
+     * options are not serialized. Therefore, they should be provided by nuxeoctl again after launcher's restart.
      *
      * @param command command to persist (appended as a new line)
      * @throws IllegalStateException if any exception occurs
-     * @see #INSTALL_AFTER_RESTART
+     * @see #pendingFile
      * @since 10.2
      */
     protected void persistPendingCommand(String command) {
-        Path path = getInstallAfterRestartPath();
         try {
-            Files.write(path, Arrays.asList(command), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.write(pendingFile, Arrays.asList(command), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot write to file " + path, e);
+            throw new IllegalStateException("Cannot write to file " + pendingFile, e);
         }
     }
 
@@ -1022,6 +1028,7 @@ public class ConnectBroker {
 
         // backup the commandsFile before any real execution
         Path commandsPath = commandsFile.toPath();
+        pendingFile = commandsPath;
         Path backup = commandsPath.resolveSibling(commandsFile.getName() + ".bak");
         try {
             Queue<String> remainingCmds = new LinkedList<>(Files.readAllLines(commandsFile.toPath()));
@@ -1490,7 +1497,6 @@ public class ConnectBroker {
                     }
                     if (isRestartRequired()) {
                         persistPendingCommand(CommandInfo.CMD_UNINSTALL, packageIdsToRemove);
-                        // TODO Handle ignoreMissing?
                         persistPendingCommand(CommandInfo.CMD_INSTALL, packageIdsToInstall);
                         throw new LauncherRestartException();
                     }
@@ -1515,7 +1521,6 @@ public class ConnectBroker {
                         return false;
                     }
                     if (isRestartRequired()) {
-                        // TODO Handle ignoreMissing?
                         persistPendingCommand(CommandInfo.CMD_INSTALL, packageIdsToInstall);
                         throw new LauncherRestartException();
                     }
