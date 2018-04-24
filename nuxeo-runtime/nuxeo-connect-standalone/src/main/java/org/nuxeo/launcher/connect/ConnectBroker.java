@@ -1023,15 +1023,11 @@ public class ConnectBroker {
         // backup the commandsFile before any real execution
         Path commandsPath = commandsFile.toPath();
         Path backup = commandsPath.resolveSibling(commandsFile.getName() + ".bak");
-        if (doExecute) {
-            try {
-                Files.move(commandsPath, backup, StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException e) {
-                log.error("Failed to backup the commands file: " + commandsFile, e);
-            }
-        }
         try {
             Queue<String> remainingCmds = new LinkedList<>(Files.readAllLines(commandsFile.toPath()));
+            if (doExecute) {
+                Files.move(commandsPath, backup, StandardCopyOption.REPLACE_EXISTING);
+            }
             while (!remainingCmds.isEmpty()) {
                 String line = remainingCmds.poll().trim();
                 String[] split = line.split("\\s+", 2);
@@ -1147,7 +1143,7 @@ public class ConnectBroker {
                 cset.log(true);
             }
         } catch (IOException e) {
-            log.error(e.getMessage());
+            log.error(e.getMessage(), e.getCause());
         }
         return errorValue == 0;
     }

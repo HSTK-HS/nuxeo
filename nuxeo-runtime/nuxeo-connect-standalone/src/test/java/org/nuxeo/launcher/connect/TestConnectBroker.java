@@ -22,6 +22,7 @@ package org.nuxeo.launcher.connect;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.fail;
+import static org.nuxeo.launcher.connect.ConnectBroker.LAUNCHER_CHANGED_PROPERTY;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -84,6 +85,8 @@ public class TestConnectBroker {
 
     protected ConnectBroker connectBroker;
 
+    private Environment environment;
+
     @Inject
     Server server;
 
@@ -145,7 +148,7 @@ public class TestConnectBroker {
         // add fake connect request handler for package downloads
         server.setHandler(new FakeConnectDownloadHandler());
 
-        Environment environment = Environment.getDefault();
+        environment = Environment.getDefault();
         environment.setProperty(Environment.DISTRIBUTION_NAME, "server");
         environment.setProperty(Environment.DISTRIBUTION_VERSION, "8.3");
         connectBroker = new ConnectBroker(environment);
@@ -196,7 +199,7 @@ public class TestConnectBroker {
     @Test
     public void testInstallPackageRequest_restartLauncherWithoutPendingCommand() {
         // Given a downloaded package, which requires launcher restart
-        checkPackagesState(connectBroker, Arrays.asList("NXP-24507-A-1.0.0"), PackageState.DOWNLOADED);
+        checkPackagesState(PackageState.DOWNLOADED, "NXP-24507-A-1.0.0");
 
         // When handling the install request
         try {
@@ -217,7 +220,7 @@ public class TestConnectBroker {
         // Given a downloaded package, which requires launcher restart
         String pkgA = "NXP-24507-A-1.0.0";
         String pkgB = "NXP-24507-B-1.0.0";
-        checkPackagesState(connectBroker, Arrays.asList(pkgA, pkgB), PackageState.DOWNLOADED);
+        checkPackagesState(PackageState.DOWNLOADED, pkgA, pkgB);
 
         // When handling the install request
         try {
@@ -227,9 +230,11 @@ public class TestConnectBroker {
             // Then restarting launcher is required
             assertThat(connectBroker.isRestartRequired()).isTrue();
         }
+        // And package A is installed
+        checkPackagesState(PackageState.STARTED, pkgA);
         // And a file is created for pending changes
         Path pending = connectBroker.getInstallAfterRestartPath();
-        assertThat(pending).hasContent("install NXP-24507-B-1.0.0");
+        assertThat(pending).hasContent("install " + pkgB);
     }
 
     @Test
@@ -272,6 +277,50 @@ public class TestConnectBroker {
         } catch (IllegalStateException e) {
             // Then an exception is raised
         }
+    }
+
+    @Test
+    public void testExecutePending_resumeCommands() throws Exception {
+        // Given an exiting path for pending commands
+        Path path = connectBroker.getInstallAfterRestartPath();
+        Files.write(path, Arrays.asList("install A-1.2.0", "install B-1.0.1"));
+
+        // When executing the pending changes
+        connectBroker.executePending(path.toFile(), true, true, false);
+
+        // Then the packages are installed and started
+        checkPackagesState(PackageState.STARTED, "A-1.2.0", "B-1.0.1");
+    }
+
+    // NXP-24507
+    @Test
+    public void testExecutePending_restartAgain() throws Exception {
+        // Given an exiting path for pending commands
+        String pkgA = "NXP-24507-A-1.0.0";
+        String pkgB = "NXP-24507-B-1.0.0";
+        Path path = connectBroker.getInstallAfterRestartPath();
+        Files.write(path, Arrays.asList("install " + pkgA, "install " + pkgB));
+
+        // When executing the pending changes
+        try {
+            connectBroker.executePending(path.toFile(), true, true, false);
+            fail();
+        } catch (LauncherRestartException e) {
+            // Then restarting launcher is required
+            assertThat(connectBroker.isRestartRequired()).isTrue();
+            // And package A is installed and package B is pending
+            checkPackagesState(PackageState.STARTED, pkgA);
+            assertThat(path).hasContent("install " + pkgB);
+        }
+
+        // When launcher is restarted and executes the pending changes again
+        // (hack: System.exit(int) is replaced by property changes)
+        environment.setProperty(LAUNCHER_CHANGED_PROPERTY, "false");
+        boolean result = connectBroker.executePending(path.toFile(), true, true, false);
+
+        // Then execution is successful and both packages are installed
+        assertThat(result).isTrue();
+        checkPackagesState(PackageState.STARTED, pkgA, pkgB);
     }
 
     @Test
